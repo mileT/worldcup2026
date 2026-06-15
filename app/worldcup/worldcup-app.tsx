@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BRACKET_LAYOUT,
   GROUP_IDS,
@@ -13,9 +13,18 @@ import {
 import {
   Predictions,
   ResolvedMatch,
+  SlotLabeler,
   championRoad,
   resolveBracket,
 } from './logic';
+import {
+  I18nProvider,
+  LANGUAGES,
+  Lang,
+  Strings,
+  fmt,
+  useI18n,
+} from './i18n';
 
 const STORAGE_KEY = 'wc2026-predictions-v1';
 
@@ -30,11 +39,12 @@ function defaultPredictions(): Predictions {
 /* ------------------------------ small pieces ------------------------------ */
 
 function Flag({ team, className = 'h-4 w-6' }: { team: Team; className?: string }) {
+  const { teamName } = useI18n();
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={flagUrl(team, 40)}
-      alt={`${team.name} flag`}
+      alt={`${teamName(team.id)} flag`}
       crossOrigin="anonymous"
       className={`${className} shrink-0 rounded-[2px] object-cover ring-1 ring-white/20`}
     />
@@ -52,13 +62,14 @@ function TeamRow({
   state: 'winner' | 'loser' | 'none';
   onClick?: () => void;
 }) {
+  const { t, teamName } = useI18n();
   const team = teamId ? TEAMS[teamId] : null;
   return (
     <button
       type="button"
       disabled={!team}
       onClick={onClick}
-      title={team ? 'Click to advance' : undefined}
+      title={team ? t.clickToAdvance : undefined}
       className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs transition
         ${state === 'winner' ? 'bg-emerald-500/20 font-semibold text-emerald-300' : ''}
         ${state === 'loser' ? 'text-slate-500' : ''}
@@ -68,7 +79,7 @@ function TeamRow({
       {team ? (
         <>
           <Flag team={team} />
-          <span className="truncate">{team.name}</span>
+          <span className="truncate">{teamName(team.id)}</span>
           {state === 'winner' && <span className="ml-auto text-emerald-400">›</span>}
         </>
       ) : (
@@ -152,6 +163,7 @@ function GroupCard({
   onToggleThird: (group: GroupId) => void;
   dragRef: React.MutableRefObject<{ group: GroupId; index: number } | null>;
 }) {
+  const { t, teamName } = useI18n();
   const rowStyle = (i: number) => {
     if (i < 2) return 'border-l-2 border-emerald-400/80 bg-emerald-500/[0.07]';
     if (i === 2 && thirdSelected) return 'border-l-2 border-amber-400/80 bg-amber-400/[0.07]';
@@ -161,8 +173,8 @@ function GroupCard({
   return (
     <div className="rounded-xl border border-white/10 bg-slate-900/70 shadow-lg shadow-black/20">
       <div className="flex items-center justify-between rounded-t-xl border-b border-white/10 bg-white/[0.03] px-3 py-2">
-        <h3 className="text-sm font-bold tracking-wide text-slate-100">Group {group}</h3>
-        <span className="text-[10px] uppercase tracking-wider text-slate-500">drag to sort</span>
+        <h3 className="text-sm font-bold tracking-wide text-slate-100">{fmt(t.groupLabel, { id: group })}</h3>
+        <span className="text-[10px] uppercase tracking-wider text-slate-500">{t.dragToSort}</span>
       </div>
       <ul>
         {order.map((teamId, i) => {
@@ -185,27 +197,27 @@ function GroupCard({
             >
               <span className="w-4 text-center text-xs font-bold text-slate-500">{i + 1}</span>
               <Flag team={team} className="h-[18px] w-[27px]" />
-              <span className="truncate text-slate-100">{team.name}</span>
+              <span className="truncate text-slate-100">{teamName(team.id)}</span>
               <span className="ml-auto flex items-center gap-0.5">
                 {i === 2 && (
                   <button
                     type="button"
                     onClick={() => onToggleThird(group)}
                     disabled={!thirdSelected && thirdsFull}
-                    title="Toggle: advances as one of the 8 best third-placed teams"
+                    title={t.best3rdTitle}
                     className={`mr-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition
                       ${thirdSelected
                         ? 'bg-amber-400/20 text-amber-300 ring-1 ring-amber-400/50'
                         : 'bg-white/5 text-slate-500 ring-1 ring-white/10 hover:text-slate-300 disabled:opacity-40'}`}
                   >
-                    {thirdSelected ? 'BEST 3RD ✓' : 'BEST 3RD'}
+                    {thirdSelected ? `${t.best3rd} ✓` : t.best3rd}
                   </button>
                 )}
                 <button
                   type="button"
                   onClick={() => onMove(group, i, i - 1)}
                   disabled={i === 0}
-                  aria-label={`Move ${team.name} up`}
+                  aria-label={fmt(t.moveUp, { team: teamName(team.id) })}
                   className="rounded px-1 text-slate-500 hover:bg-white/10 hover:text-slate-200 disabled:invisible"
                 >
                   ▲
@@ -214,7 +226,7 @@ function GroupCard({
                   type="button"
                   onClick={() => onMove(group, i, i + 1)}
                   disabled={i === 3}
-                  aria-label={`Move ${team.name} down`}
+                  aria-label={fmt(t.moveDown, { team: teamName(team.id) })}
                   className="rounded px-1 text-slate-500 hover:bg-white/10 hover:text-slate-200 disabled:invisible"
                 >
                   ▼
@@ -230,20 +242,12 @@ function GroupCard({
 
 /* ----------------------------- champion banner ----------------------------- */
 
-const ROUND_SHORT: Record<string, string> = {
-  R32: 'Round of 32',
-  R16: 'Round of 16',
-  QF: 'Quarter-final',
-  SF: 'Semi-final',
-  F: 'Final',
-};
-
-function roundOf(matchId: number): string {
-  if (matchId <= 88) return 'R32';
-  if (matchId <= 96) return 'R16';
-  if (matchId <= 100) return 'QF';
-  if (matchId <= 102) return 'SF';
-  return 'F';
+function roundShortLabel(matchId: number, t: Strings): string {
+  if (matchId <= 88) return t.roundR32;
+  if (matchId <= 96) return t.roundR16;
+  if (matchId <= 100) return t.roundQF;
+  if (matchId <= 102) return t.roundSF;
+  return t.roundFinal;
 }
 
 function ChampionSection({
@@ -251,10 +255,11 @@ function ChampionSection({
 }: {
   road: { champion: string; road: ResolvedMatch[] } | null;
 }) {
+  const { t, teamName } = useI18n();
   if (!road) {
     return (
       <div className="mb-6 rounded-2xl border border-dashed border-white/15 bg-white/[0.02] px-6 py-5 text-center text-sm text-slate-500">
-        Pick winners through the bracket below — your champion and their road will appear here.
+        {t.championPrompt}
       </div>
     );
   }
@@ -267,9 +272,9 @@ function ChampionSection({
           <Flag team={champ} className="h-8 w-12" />
           <div>
             <div className="text-[10px] font-bold uppercase tracking-[0.2em] text-yellow-400/80">
-              World Champion
+              {t.worldChampion}
             </div>
-            <div className="text-2xl font-black text-yellow-300">{champ.name}</div>
+            <div className="text-2xl font-black text-yellow-300">{teamName(champ.id)}</div>
           </div>
         </div>
         <ol className="flex flex-wrap items-center gap-2">
@@ -282,13 +287,13 @@ function ChampionSection({
                 className="flex items-center gap-2 rounded-lg border border-white/10 bg-slate-900/80 px-2.5 py-1.5"
               >
                 <span className="text-[9px] font-bold uppercase tracking-wider text-slate-500">
-                  {ROUND_SHORT[roundOf(m.id)]}
+                  {roundShortLabel(m.id, t)}
                 </span>
                 {opp && (
                   <span className="flex items-center gap-1.5 text-xs text-slate-200">
-                    <span className="text-slate-500">vs</span>
+                    <span className="text-slate-500">{t.vs}</span>
                     <Flag team={opp} />
-                    {opp.name}
+                    {teamName(opp.id)}
                   </span>
                 )}
               </li>
@@ -303,6 +308,7 @@ function ChampionSection({
 /* ------------------------------- coffee modal ------------------------------ */
 
 function CoffeeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { t } = useI18n();
   if (!open) return null;
   return (
     <div
@@ -312,18 +318,13 @@ function CoffeeModal({ open, onClose }: { open: boolean; onClose: () => void }) 
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Buy me a coffee"
+        aria-label={t.coffeeCta}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-sm rounded-2xl border border-amber-400/30 bg-slate-900 p-6 text-center shadow-2xl shadow-black/50"
       >
         <div className="text-5xl">☕</div>
-        <h3 className="mt-3 text-lg font-bold text-slate-100">
-          Your road map is downloading!
-        </h3>
-        <p className="mt-2 text-sm text-slate-400">
-          Enjoying the World Cup predictor? If you'd like to support it, you can buy me a
-          coffee — it keeps the predictions brewing.
-        </p>
+        <h3 className="mt-3 text-lg font-bold text-slate-100">{t.coffeeTitle}</h3>
+        <p className="mt-2 text-sm text-slate-400">{t.coffeeBody}</p>
         <a
           href="https://buymeacoffee.com/macstone"
           target="_blank"
@@ -331,29 +332,72 @@ function CoffeeModal({ open, onClose }: { open: boolean; onClose: () => void }) 
           onClick={onClose}
           className="mt-5 block w-full rounded-xl bg-amber-400 px-4 py-2.5 text-sm font-bold text-amber-950 shadow-lg shadow-amber-400/20 transition hover:bg-amber-300"
         >
-          ☕ Buy me a coffee
+          ☕ {t.coffeeCta}
         </a>
         <button
           type="button"
           onClick={onClose}
           className="mt-2 w-full rounded-xl border border-white/10 px-4 py-2.5 text-sm text-slate-400 transition hover:bg-white/5 hover:text-slate-200"
         >
-          Maybe later
+          {t.coffeeLater}
         </button>
       </div>
     </div>
   );
 }
 
+/* ----------------------------- language switcher --------------------------- */
+
+function LanguageSwitcher() {
+  const { lang, setLang, t } = useI18n();
+  return (
+    <label className="relative flex items-center">
+      <span className="sr-only">{t.selectLanguage}</span>
+      <select
+        value={lang}
+        onChange={(e) => setLang(e.target.value as Lang)}
+        aria-label={t.selectLanguage}
+        className="cursor-pointer rounded-lg border border-white/15 bg-slate-900 py-2 pl-3 pr-8 text-sm text-slate-200 transition hover:bg-white/5 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+      >
+        {LANGUAGES.map((l) => (
+          <option key={l.code} value={l.code} className="bg-slate-900 text-slate-100">
+            {l.label}
+          </option>
+        ))}
+      </select>
+      <span className="pointer-events-none absolute right-2.5 text-xs text-slate-400">▾</span>
+    </label>
+  );
+}
+
 /* --------------------------------- main app -------------------------------- */
 
 export default function WorldCupApp() {
+  return (
+    <I18nProvider>
+      <WorldCupInner />
+    </I18nProvider>
+  );
+}
+
+function WorldCupInner() {
+  const { t, teamName } = useI18n();
   const [p, setP] = useState<Predictions>(defaultPredictions);
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showCoffee, setShowCoffee] = useState(false);
   const dragRef = useRef<{ group: GroupId; index: number } | null>(null);
   const exportRef = useRef<HTMLDivElement>(null);
+
+  const labeler = useMemo<SlotLabeler>(
+    () => ({
+      winner: (g) => fmt(t.slotWinner, { g }),
+      runner: (g) => fmt(t.slotRunner, { g }),
+      third: (groups) => fmt(t.slotThird, { groups }),
+      winnerMatch: (m) => fmt(t.slotWinnerMatch, { m }),
+    }),
+    [t],
+  );
 
   useEffect(() => {
     try {
@@ -369,7 +413,7 @@ export default function WorldCupApp() {
     if (loaded) localStorage.setItem(STORAGE_KEY, JSON.stringify(p));
   }, [p, loaded]);
 
-  const resolved = useMemo(() => resolveBracket(p), [p]);
+  const resolved = useMemo(() => resolveBracket(p, labeler), [p, labeler]);
   const road = useMemo(() => championRoad(resolved), [resolved]);
 
   const moveTeam = (group: GroupId, from: number, to: number) => {
@@ -403,7 +447,7 @@ export default function WorldCupApp() {
   };
 
   const reset = () => {
-    if (confirm('Reset all predictions?')) setP(defaultPredictions());
+    if (confirm(t.resetConfirm)) setP(defaultPredictions());
   };
 
   const saveImage = async () => {
@@ -423,7 +467,7 @@ export default function WorldCupApp() {
       setShowCoffee(true);
     } catch (err) {
       console.error(err);
-      alert('Sorry, the image could not be generated.');
+      alert(t.imageError);
     } finally {
       setSaving(false);
     }
@@ -438,27 +482,26 @@ export default function WorldCupApp() {
         <div className="mx-auto flex max-w-[1900px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
           <div>
             <h1 className="text-lg font-black tracking-tight sm:text-xl">
-              <span className="text-emerald-400">FIFA World Cup 2026</span> · Bracket Predictor
+              <span className="text-emerald-400">FIFA World Cup 2026</span> · {t.subtitle}
             </h1>
-            <p className="text-xs text-slate-400">
-              Sort each group, pick every knockout winner, crown your champion.
-            </p>
+            <p className="text-xs text-slate-400">{t.tagline}</p>
           </div>
           <div className="flex items-center gap-2">
+            <LanguageSwitcher />
             <button
               type="button"
               onClick={saveImage}
               disabled={saving}
               className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950 shadow-lg shadow-emerald-500/20 transition hover:bg-emerald-400 disabled:opacity-60"
             >
-              {saving ? 'Saving…' : '📸 Save road map image'}
+              {saving ? t.saving : `📸 ${t.save}`}
             </button>
             <button
               type="button"
               onClick={reset}
               className="rounded-lg border border-white/15 px-3 py-2 text-sm text-slate-300 transition hover:bg-white/5"
             >
-              Reset
+              {t.reset}
             </button>
           </div>
         </div>
@@ -469,11 +512,23 @@ export default function WorldCupApp() {
         <section className="pt-8">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
             <div>
-              <h2 className="text-base font-bold">Group Stage</h2>
+              <h2 className="text-base font-bold">{t.groupStage}</h2>
               <p className="text-xs text-slate-400">
-                Drag (or use the arrows) to order each group.{' '}
-                <span className="text-emerald-400">Top two advance</span>; mark the{' '}
-                <span className="text-amber-300">8 best third-placed teams</span>.
+                {t.groupHint.split(/(\{topTwo\}|\{thirds\})/).map((part, i) => {
+                  if (part === '{topTwo}')
+                    return (
+                      <span key={i} className="text-emerald-400">
+                        {t.topTwo}
+                      </span>
+                    );
+                  if (part === '{thirds}')
+                    return (
+                      <span key={i} className="text-amber-300">
+                        {t.thirds}
+                      </span>
+                    );
+                  return <Fragment key={i}>{part}</Fragment>;
+                })}
               </p>
             </div>
             <span
@@ -483,7 +538,7 @@ export default function WorldCupApp() {
                   : 'bg-red-500/10 text-red-300 ring-red-400/40'
               }`}
             >
-              Best thirds: {thirdsCount}/8 selected
+              {fmt(t.bestThirds, { n: thirdsCount })}
             </span>
           </div>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
@@ -506,11 +561,8 @@ export default function WorldCupApp() {
         <section className="pt-10">
           <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
             <div>
-              <h2 className="text-base font-bold">Knockout Stage — Road to the Final</h2>
-              <p className="text-xs text-slate-400">
-                Click a team to advance it. The final is in the middle. Scroll sideways on small
-                screens.
-              </p>
+              <h2 className="text-base font-bold">{t.knockoutTitle}</h2>
+              <p className="text-xs text-slate-400">{t.knockoutHint}</p>
             </div>
           </div>
 
@@ -519,15 +571,15 @@ export default function WorldCupApp() {
             <div ref={exportRef} className="w-max min-w-full bg-slate-950 p-6">
               <ChampionSection road={road} />
               <div className="flex items-stretch gap-3">
-                <BracketColumn title="Round of 32" matchIds={BRACKET_LAYOUT.left.R32} resolved={resolved} onPick={pickWinner} />
-                <BracketColumn title="Round of 16" matchIds={BRACKET_LAYOUT.left.R16} resolved={resolved} onPick={pickWinner} />
-                <BracketColumn title="Quarters" matchIds={BRACKET_LAYOUT.left.QF} resolved={resolved} onPick={pickWinner} />
-                <BracketColumn title="Semi-final" matchIds={BRACKET_LAYOUT.left.SF} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.roundR32} matchIds={BRACKET_LAYOUT.left.R32} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.roundR16} matchIds={BRACKET_LAYOUT.left.R16} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.colQuarters} matchIds={BRACKET_LAYOUT.left.QF} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.roundSF} matchIds={BRACKET_LAYOUT.left.SF} resolved={resolved} onPick={pickWinner} />
 
                 {/* final, centered */}
                 <div className="flex h-[780px] flex-col">
                   <div className="pb-2 text-center text-[11px] font-semibold uppercase tracking-widest text-yellow-400">
-                    Final · July 19
+                    {t.finalDate}
                   </div>
                   <div className="flex flex-1 flex-col items-center justify-center gap-3">
                     <span className="text-4xl">🏆</span>
@@ -537,16 +589,16 @@ export default function WorldCupApp() {
                     {road && (
                       <div className="flex items-center gap-2 rounded-full bg-yellow-400/10 px-3 py-1 text-xs font-bold text-yellow-300 ring-1 ring-yellow-400/40">
                         <Flag team={TEAMS[road.champion]} />
-                        {TEAMS[road.champion].name}
+                        {teamName(road.champion)}
                       </div>
                     )}
                   </div>
                 </div>
 
-                <BracketColumn title="Semi-final" matchIds={BRACKET_LAYOUT.right.SF} resolved={resolved} onPick={pickWinner} />
-                <BracketColumn title="Quarters" matchIds={BRACKET_LAYOUT.right.QF} resolved={resolved} onPick={pickWinner} />
-                <BracketColumn title="Round of 16" matchIds={BRACKET_LAYOUT.right.R16} resolved={resolved} onPick={pickWinner} />
-                <BracketColumn title="Round of 32" matchIds={BRACKET_LAYOUT.right.R32} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.roundSF} matchIds={BRACKET_LAYOUT.right.SF} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.colQuarters} matchIds={BRACKET_LAYOUT.right.QF} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.roundR16} matchIds={BRACKET_LAYOUT.right.R16} resolved={resolved} onPick={pickWinner} />
+                <BracketColumn title={t.roundR32} matchIds={BRACKET_LAYOUT.right.R32} resolved={resolved} onPick={pickWinner} />
               </div>
             </div>
           </div>

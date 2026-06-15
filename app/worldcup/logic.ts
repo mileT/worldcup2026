@@ -68,17 +68,37 @@ export interface ResolvedMatch {
   winner: string | null;
 }
 
-function slotLabel(slot: Slot): string {
-  if (slot.type === 'group') return `${slot.pos === 1 ? 'Winner' : 'Runner-up'} ${slot.group}`;
-  if (slot.type === 'third') return `3rd ${THIRD_SLOT_OPTIONS[slot.match].join('/')}`;
-  return `Winner M${slot.match}`;
+/** Produces the human-readable label for an unresolved bracket slot. */
+export interface SlotLabeler {
+  winner: (group: GroupId) => string;
+  runner: (group: GroupId) => string;
+  third: (groups: string) => string;
+  winnerMatch: (match: number) => string;
+}
+
+const DEFAULT_LABELER: SlotLabeler = {
+  winner: (g) => `Winner ${g}`,
+  runner: (g) => `Runner-up ${g}`,
+  third: (groups) => `3rd ${groups}`,
+  winnerMatch: (m) => `Winner M${m}`,
+};
+
+function slotLabel(slot: Slot, labeler: SlotLabeler): string {
+  if (slot.type === 'group') {
+    return slot.pos === 1 ? labeler.winner(slot.group) : labeler.runner(slot.group);
+  }
+  if (slot.type === 'third') return labeler.third(THIRD_SLOT_OPTIONS[slot.match].join('/'));
+  return labeler.winnerMatch(slot.match);
 }
 
 /**
  * Resolve every knockout match from the current predictions, dropping any
  * picked winner that is no longer one of the match participants.
  */
-export function resolveBracket(p: Predictions): Record<number, ResolvedMatch> {
+export function resolveBracket(
+  p: Predictions,
+  labeler: SlotLabeler = DEFAULT_LABELER,
+): Record<number, ResolvedMatch> {
   const thirdAssignment = assignThirdSlots(p.thirds);
   const resolved: Record<number, ResolvedMatch> = {};
 
@@ -100,8 +120,8 @@ export function resolveBracket(p: Predictions): Record<number, ResolvedMatch> {
       id: m.id,
       home,
       away,
-      homeLabel: slotLabel(m.home),
-      awayLabel: slotLabel(m.away),
+      homeLabel: slotLabel(m.home, labeler),
+      awayLabel: slotLabel(m.away, labeler),
       winner,
     };
   }
